@@ -146,8 +146,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Settings"
-            window.setContentSize(NSSize(width: 400, height: 350))
-            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.setContentSize(NSSize(width: 500, height: 550))
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.minSize = NSSize(width: 450, height: 500)
             window.center()
             window.isReleasedWhenClosed = false
             
@@ -171,108 +172,144 @@ struct SettingsView: View {
     
     var body: some View {
         TabView {
-            // General / Appearance Tab
-            Form {
-                Section(header: Text("Appearance")) {
-                    Picker("Theme", selection: $appTheme) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.vertical, 8)
-                }
-                
-                Section(header: Text("Startup")) {
-                    if #available(macOS 13.0, *) {
-                        Toggle("Launch at Login", isOn: Binding(
-                            get: { SMAppService.mainApp.status == .enabled },
-                            set: { newValue in
-                                do {
-                                    if newValue {
-                                        try SMAppService.mainApp.register()
-                                    } else {
-                                        try SMAppService.mainApp.unregister()
-                                    }
-                                } catch {
-                                    print("Failed to update login item: \(error)")
-                                }
+            // General Tab
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Appearance Section
+                    GroupBox(label: Label("Appearance", systemImage: "paintbrush.fill")) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("Theme", selection: $appTheme) {
+                                Text("System").tag("system")
+                                Text("Light").tag("light")
+                                Text("Dark").tag("dark")
                             }
-                        ))
-                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                    } else {
-                        Text("Launch at Login requires macOS 13.0+")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Section(header: Text("Behavior")) {
-                    Toggle("Sound Effects", isOn: $soundEffectsEnabled)
-                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                    
-                    Toggle("Show Item Count in Menu Bar", isOn: $showCountInMenuBar)
-                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                    
-                    Picker("History Limit:", selection: $historyLimit) {
-                        Text("50 items").tag(50)
-                        Text("100 items").tag(100)
-                        Text("200 items").tag(200)
-                        Text("500 items").tag(500)
-                        Text("Unlimited").tag(0)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    Text("Maximum number of items to keep in history. Set to Unlimited for no limit.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Section(header: Text("Storage Management")) {
-                    Picker("Auto-delete items:", selection: $autoDeleteInterval) {
-                        Text("Never").tag(0)
-                        Text("After 3 Days").tag(3)
-                        Text("After 7 Days").tag(7)
-                        Text("After 30 Days").tag(30)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    Text("Unpinned items older than the selected period will be automatically removed on app launch.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Section(header: Text("Keyboard Shortcut")) {
-                    HStack {
-                        Text("Toggle Clipboard:")
-                        Spacer()
-                        Button(action: {
-                            isRecording = true
-                        }) {
-                            Text(isRecording ? "Press Keys..." : hotKeyManager.currentKeyString)
-                                .font(.system(.body, design: .monospaced))
-                                .padding(6)
-                                .background(isRecording ? Color.accentColor : Color.gray.opacity(0.2))
-                                .foregroundColor(isRecording ? .white : .primary)
-                                .cornerRadius(6)
+                            .pickerStyle(SegmentedPickerStyle())
                         }
-                        .buttonStyle(.plain)
-                        .background(KeyRecorder(isRecording: $isRecording, manager: hotKeyManager))
+                        .padding(8)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.horizontal)
+                    .padding(.top)
                     
-                    Text("Click to record a new shortcut.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    // Startup Section
+                    GroupBox(label: Label("Startup", systemImage: "power")) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if #available(macOS 13.0, *) {
+                                Toggle("Launch at Login", isOn: Binding(
+                                    get: { SMAppService.mainApp.status == .enabled },
+                                    set: { newValue in
+                                        do {
+                                            if newValue {
+                                                try SMAppService.mainApp.register()
+                                            } else {
+                                                try SMAppService.mainApp.unregister()
+                                            }
+                                        } catch {
+                                            print("Failed to update login item: \(error)")
+                                        }
+                                    }
+                                ))
+                                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                            } else {
+                                Text("Launch at Login requires macOS 13.0+")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    
+                    // Behavior Section
+                    GroupBox(label: Label("Behavior", systemImage: "slider.horizontal.3")) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Toggle("Sound Effects", isOn: $soundEffectsEnabled)
+                                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                            
+                            Divider()
+                            
+                            Toggle("Show Item Count in Menu Bar", isOn: $showCountInMenuBar)
+                                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                            
+                            Divider()
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Picker("History Limit", selection: $historyLimit) {
+                                    Text("50 items").tag(50)
+                                    Text("100 items").tag(100)
+                                    Text("200 items").tag(200)
+                                    Text("500 items").tag(500)
+                                    Text("Unlimited").tag(0)
+                                }
+                                
+                                Text("Maximum items to keep in history")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    
+                    // Storage Management Section
+                    GroupBox(label: Label("Storage Management", systemImage: "internaldrive")) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("Auto-delete items", selection: $autoDeleteInterval) {
+                                Text("Never").tag(0)
+                                Text("After 3 Days").tag(3)
+                                Text("After 7 Days").tag(7)
+                                Text("After 30 Days").tag(30)
+                            }
+                            
+                            Text("Unpinned items older than selected period will be removed on app launch")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    
+                    // Keyboard Shortcut Section
+                    GroupBox(label: Label("Keyboard Shortcut", systemImage: "command")) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Toggle Clipboard:")
+                                Spacer()
+                                Button(action: {
+                                    isRecording = true
+                                }) {
+                                    Text(isRecording ? "Press Keys..." : hotKeyManager.currentKeyString)
+                                        .font(.system(.body, design: .monospaced))
+                                        .padding(8)
+                                        .frame(minWidth: 120)
+                                        .background(isRecording ? Color.accentColor : Color.gray.opacity(0.2))
+                                        .foregroundColor(isRecording ? .white : .primary)
+                                        .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                                .background(KeyRecorder(isRecording: $isRecording, manager: hotKeyManager))
+                            }
+                            
+                            Text("Click to record a new shortcut")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
                 }
             }
-            .padding()
             .tabItem {
                 Label("General", systemImage: "gear")
             }
             
             // About Tab
-            VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 20) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 80, height: 80)
@@ -331,13 +368,13 @@ struct SettingsView: View {
                 }
                 .padding(.top, 10)
                 .foregroundColor(.secondary)
+                }
+                .padding()
             }
-            .padding()
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 400, height: 350) // Increased height for new section
     }
 }
 

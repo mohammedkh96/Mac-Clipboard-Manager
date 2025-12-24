@@ -47,6 +47,7 @@ class ClipboardMonitor: ObservableObject {
     
     // Auto-Delete Setting (days). 0 = Never
     @AppStorage("autoDeleteInterval") private var autoDeleteInterval: Int = 0
+    @AppStorage("historyLimit") private var historyLimit: Int = 100
     
     private var lastChangeCount: Int = 0
     private var timer: Timer?
@@ -136,8 +137,9 @@ class ClipboardMonitor: ObservableObject {
     }
     
     private func limitHistory() {
-        if self.history.count > 100 {
-            // If we remove items, check for images to delete from disk
+        // 0 = unlimited
+        guard historyLimit > 0, self.history.count > historyLimit else { return }
+        while self.history.count > historyLimit {
             let removed = self.history.popLast()
             cleanupFiles(for: removed)
         }
