@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 import Carbon
 
 @main
@@ -177,6 +178,31 @@ struct SettingsView: View {
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .padding(.vertical, 8)
+                    .padding(.vertical, 8)
+                }
+                
+                Section(header: Text("Startup")) {
+                    if #available(macOS 13.0, *) {
+                        Toggle("Launch at Login", isOn: Binding(
+                            get: { SMAppService.mainApp.status == .enabled },
+                            set: { newValue in
+                                do {
+                                    if newValue {
+                                        try SMAppService.mainApp.register()
+                                    } else {
+                                        try SMAppService.mainApp.unregister()
+                                    }
+                                } catch {
+                                    print("Failed to update login item: \(error)")
+                                }
+                            }
+                        ))
+                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                    } else {
+                        Text("Launch at Login requires macOS 13.0+")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Section(header: Text("Storage Management")) {

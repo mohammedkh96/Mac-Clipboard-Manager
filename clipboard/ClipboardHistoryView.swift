@@ -129,6 +129,7 @@ struct ClipboardHistoryView: View {
                     }
                     .padding(.bottom, 20)
                 }
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.4))
             }
             .blur(radius: editingItem != nil || showAboutSheet ? 5 : 0)
             .disabled(editingItem != nil || showAboutSheet)
@@ -151,7 +152,7 @@ struct ClipboardHistoryView: View {
                     .shadow(radius: 20)
             }
         }
-        .background(VisualEffectBlur(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
+        .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow).ignoresSafeArea())
         .frame(width: 380, height: 600)
         .preferredColorScheme(appTheme == "light" ? .light : (appTheme == "dark" ? .dark : nil))
     }
@@ -522,7 +523,7 @@ struct AboutView: View {
                 Text("Mac Clipboard Manager")
                     .font(.title2)
                     .fontWeight(.bold)
-                Text("Version 4.0.0")
+                Text("Version 4.0.0 (2025)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -531,17 +532,53 @@ struct AboutView: View {
                 .frame(width: 200)
             
             VStack(spacing: 8) {
-                Text("Developed by")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                Text("Haji Salam")
-                .font(.headline)
+                Text("Designed & Developed by")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("Eng. Mohammed Ahmed")
+                    .font(.headline)
+                    .fontWeight(.semibold)
             }
             
-            Text("© 2025 Haji Salam. All rights reserved.")
-                .font(.caption2)
-                .foregroundColor(.tertiaryLabel)
-                .padding(.top, 10)
+            // Social Links
+            HStack(spacing: 20) {
+                // GitHub
+                Link(destination: URL(string: "https://github.com/mohammedkh96")!) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "cube.transparent")
+                            .font(.system(size: 20))
+                        Text("GitHub")
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.primary)
+                
+                // Instagram
+                Link(destination: URL(string: "https://www.instagram.com/eng.mohammed.omar/")!) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "camera")
+                            .font(.system(size: 20))
+                        Text("Instagram")
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.primary)
+                
+                // Website
+                Link(destination: URL(string: "https://eng-mohammed-omar.vercel.app/")!) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 20))
+                        Text("Website")
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.primary)
+            }
+            .padding(.top, 5)
             
             Button("Close") {
                 onClose()
@@ -550,7 +587,7 @@ struct AboutView: View {
             .padding(.top, 20)
         }
         .padding(30)
-        .frame(width: 300)
+        .frame(width: 320)
         .background(VisualEffectBlur(material: .hudWindow, blendingMode: .withinWindow))
         .cornerRadius(20)
     }
