@@ -145,7 +145,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Settings"
-            window.setContentSize(NSSize(width: 400, height: 250))
+            window.setContentSize(NSSize(width: 400, height: 350))
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.center()
             window.isReleasedWhenClosed = false
@@ -160,6 +160,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct SettingsView: View {
     @AppStorage("appTheme") private var appTheme: String = "system"
+    @AppStorage("autoDeleteInterval") private var autoDeleteInterval: Int = 0
     @ObservedObject var hotKeyManager = HotKeyManager.shared
     
     @State private var isRecording = false
@@ -176,6 +177,20 @@ struct SettingsView: View {
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .padding(.vertical, 8)
+                }
+                
+                Section(header: Text("Storage Management")) {
+                    Picker("Auto-delete items:", selection: $autoDeleteInterval) {
+                        Text("Never").tag(0)
+                        Text("After 3 Days").tag(3)
+                        Text("After 7 Days").tag(7)
+                        Text("After 30 Days").tag(30)
+                    }
+                    .padding(.vertical, 4)
+                    
+                    Text("Unpinned items older than the selected period will be automatically removed on app launch.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 
                 Section(header: Text("Keyboard Shortcut")) {
@@ -213,23 +228,67 @@ struct SettingsView: View {
                     .resizable()
                     .frame(width: 80, height: 80)
                 
-                Text("Mac Clipboard Manager")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Text("Version 3.0.0")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 5) {
+                    Text("Mac Clipboard Manager")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("Version 4.0.0 (2025)")
+                        .foregroundColor(.secondary)
+                }
                 
-                Text("Designed & Developed by\nHaji Salam")
-                    .multilineTextAlignment(.center)
-                    .font(.caption)
-                    .padding()
+                VStack(spacing: 8) {
+                    Text("Designed & Developed by")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Eng. Mohammed Ahmed")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                
+                // Social Links
+                HStack(spacing: 20) {
+                    // GitHub
+                    Link(destination: URL(string: "https://github.com/mohammedkh96")!) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "cube.transparent") // Placeholder for GitHub if no asset
+                                .font(.system(size: 20))
+                            Text("GitHub")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Instagram
+                    Link(destination: URL(string: "https://www.instagram.com/eng.mohammed.omar/")!) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "camera") // Placeholder for Instagram
+                                .font(.system(size: 20))
+                            Text("Instagram")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Website
+                    Link(destination: URL(string: "https://eng-mohammed-omar.vercel.app/")!) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 20))
+                            Text("Website")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 10)
+                .foregroundColor(.secondary)
             }
             .padding()
             .tabItem {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 400, height: 250)
+        .frame(width: 400, height: 350) // Increased height for new section
     }
 }
 

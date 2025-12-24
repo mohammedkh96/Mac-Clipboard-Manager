@@ -1,6 +1,15 @@
 import SwiftUI
 import AppKit
 
+enum FilterType: String, CaseIterable, Identifiable {
+    case all = "All"
+    case text = "Text"
+    case images = "Images"
+    case links = "Links"
+    
+    var id: String { rawValue }
+}
+
 struct ClipboardHistoryView: View {
     @ObservedObject var monitor: ClipboardMonitor
     var onPaste: (ClipboardItem) -> Void
@@ -10,6 +19,7 @@ struct ClipboardHistoryView: View {
     @AppStorage("appTheme") private var appTheme: String = "system"
     
     @State private var searchText = ""
+    @State private var selectedFilter: FilterType = .all
     @State private var hoveredItemId: UUID?
     @State private var editingItem: ClipboardItem?
     @State private var showAboutSheet = false
@@ -24,12 +34,34 @@ struct ClipboardHistoryView: View {
     }
     
     private func processList(_ items: [ClipboardItem]) -> [ClipboardItem] {
-        if searchText.isEmpty {
-            return items
+        let filteredByType: [ClipboardItem]
+        
+        switch selectedFilter {
+        case .all: 
+            filteredByType = items
+        case .text: 
+            filteredByType = items.filter { $0.type == .text }
+        case .images: 
+            filteredByType = items.filter { $0.type == .image }
+        case .links:
+            filteredByType = items.filter { item in
+                if item.type == .text {
+                    // Simple detector for http/https, can use NSDataDetector in production for robustness
+                    return item.content.lowercased().contains("http://") || item.content.lowercased().contains("https://")
+                }
+                return false
+            }
         }
-        return items.filter { item in
+        
+        if searchText.isEmpty {
+            return filteredByType
+        }
+        
+        return filteredByType.filter { item in
             let contentMatch = item.content.localizedCaseInsensitiveContains(searchText)
             let appMatch = item.appBundleID?.localizedCaseInsensitiveContains(searchText) ?? false
+            // For images, we are searching the placeholder content "Image". 
+            // We could improve this by OCR or metadata later.
             return contentMatch || appMatch
         }
     }
@@ -38,8 +70,8 @@ struct ClipboardHistoryView: View {
         ZStack {
             // Main View
             VStack(spacing: 0) {
-                // Header
-                HeaderView(monitor: monitor, onClose: onClose, onAbout: { showAboutSheet = true }, onSettings: onSettings, searchText: $searchText)
+                // Header (includes Search + Filter)
+                HeaderView(monitor: monitor, onClose: onClose, onAbout: { showAboutSheet = true }, onSettings: onSettings, searchText: $searchText, selectedFilter: $selectedFilter)
                 
                 Divider()
                     .overlay(Color(nsColor: .separatorColor))
@@ -50,7 +82,7 @@ struct ClipboardHistoryView: View {
                         if !pinnedItems.isEmpty {
                             Section(header: SectionHeader(title: "Pinned", icon: "pin.fill")) {
                                 ForEach(pinnedItems) { item in
-                                    ClipboardItemRow(item: item, isHovered: hoveredItemId == item.id, onEdit: {
+                                    ClipboardItemRow(item: item, monitor: monitor, isHovered: hoveredItemId == item.id, onEdit: {
                                         editingItem = item
                                     }, onPin: {
                                         withAnimation { monitor.togglePin(id: item.id) }
@@ -72,7 +104,7 @@ struct ClipboardHistoryView: View {
                         if !recentItems.isEmpty {
                             Section(header: SectionHeader(title: "Recent", icon: "clock")) {
                                 ForEach(recentItems) { item in
-                                    ClipboardItemRow(item: item, isHovered: hoveredItemId == item.id, onEdit: {
+                                    ClipboardItemRow(item: item, monitor: monitor, isHovered: hoveredItemId == item.id, onEdit: {
                                         editingItem = item
                                     }, onPin: {
                                         withAnimation { monitor.togglePin(id: item.id) }
@@ -133,9 +165,11 @@ struct HeaderView: View {
     var onAbout: () -> Void
     var onSettings: () -> Void
     @Binding var searchText: String
+    @Binding var selectedFilter: FilterType
     
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
+            // Top Bar
             HStack {
                 Button(action: onAbout) {
                     Image(systemName: "info.circle")
@@ -177,6 +211,7 @@ struct HeaderView: View {
             .padding(.horizontal)
             .padding(.top, 14)
             
+            // Search Bar
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14))
@@ -187,15 +222,25 @@ struct HeaderView: View {
                     .font(.system(size: 13))
             }
             .padding(8)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5)) // Slightly transparent
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
             .cornerRadius(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.secondary.opacity(0.1), lineWidth: 0.5)
             )
             .padding(.horizontal)
+            
+            // Filter Tabs
+            Picker("Filter", selection: $selectedFilter) {
+                ForEach(FilterType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding(.horizontal)
+            .padding(.bottom, 6)
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, 4)
         .background(VisualEffectBlur(material: .headerView, blendingMode: .withinWindow).ignoresSafeArea())
     }
 }
@@ -216,19 +261,19 @@ struct SectionHeader: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VisualEffectBlur(material: .sidebar, blendingMode: .withinWindow)) // Stick header bg
+        .background(VisualEffectBlur(material: .sidebar, blendingMode: .withinWindow))
     }
 }
 
 struct ClipboardItemRow: View {
     let item: ClipboardItem
+    @ObservedObject var monitor: ClipboardMonitor // To load images
     let isHovered: Bool
     var onEdit: () -> Void
     var onPin: () -> Void
     var onDelete: () -> Void
     var onColor: (String?) -> Void
     
-    // Helpers for coloring
     var itemColor: Color {
         switch item.color {
         case "red": return .red
@@ -252,12 +297,36 @@ struct ClipboardItemRow: View {
                 Spacer().frame(width: 4)
             }
             
+            // Content
             VStack(alignment: .leading, spacing: 5) {
-                Text(item.content.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(.system(size: 13))
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
+                if item.type == .image {
+                    // Image Content
+                    if let path = item.imagePath, let nsImage = monitor.loadImage(filename: path) {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 100)
+                            .cornerRadius(8)
+                    } else {
+                        // Fallback or loading fail
+                        HStack {
+                            Image(systemName: "photo.fill")
+                            Text("Image (Load Failed)")
+                        }
+                        .foregroundColor(.secondary)
+                        .padding()
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                } else {
+                    // Text Content
+                    Text(item.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.system(size: 13))
+                        .lineLimit(item.isPinned ? 4 : 2) // Expand pinned slightly
+                        .foregroundColor(.primary)
+                }
                 
+                // Metadata
                 HStack(spacing: 8) {
                     if let bundleID = item.appBundleID {
                         Label(bundleID.components(separatedBy: ".").last?.capitalized ?? "App", systemImage: "app")
@@ -288,18 +357,20 @@ struct ClipboardItemRow: View {
                     .buttonStyle(.plain)
                     
                     if isHovered {
-                        // Edit Button
-                        Button(action: onEdit) {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                                .padding(4)
-                                .background(Circle().fill(Color(nsColor: .controlBackgroundColor).opacity(0.5)))
+                        // Edit Button (Only for text)
+                        if item.type == .text {
+                            Button(action: onEdit) {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                                    .padding(4)
+                                    .background(Circle().fill(Color(nsColor: .controlBackgroundColor).opacity(0.5)))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit")
                         }
-                        .buttonStyle(.plain)
-                        .help("Edit")
                         
-                        // Delete Button (New)
+                        // Delete Button
                         Button(action: onDelete) {
                             Image(systemName: "trash")
                                 .font(.system(size: 12))
@@ -319,12 +390,18 @@ struct ClipboardItemRow: View {
                 .fill(isHovered ? Color.accentColor.opacity(0.1) : Color.clear)
         )
         .onDrag {
+            // For images, dragging raw path or data?
+            // To simplify, drag item content string or image if possible.
+            // Dragging images from list to other apps is complex with NSItemProvider in SwiftUI.
+            // For now, let's stick to text representation or content string for drag.
+            // Ideally we load the image data to provider.
             return NSItemProvider(object: item.content as NSString)
         }
-        // Context Menu for extra actions
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin") { onPin() }
-            Button("Edit") { onEdit() }
+            if item.type == .text {
+                Button("Edit") { onEdit() }
+            }
             Button("Delete") { onDelete() }
             Divider()
             Text("Color Tag")
@@ -371,14 +448,6 @@ struct EmptyStateView: View {
         .padding(.top, 60)
     }
 }
-
-// MARK: - Legacy / Helper
-// (Assuming EditItemView and VisualEffectBlur remain as previously defined, or I can redefine them if you want a clean file. 
-// I will include VisualEffectBlur here for safety, but assume EditItemView is fine to reuse or I can include it below to be safe)
-
-// Re-including EditItemView to update style if needed, or just standard.
-// For Conciseness, I will assume EditItemView exists in file or append it. 
-// ACTUALLY, I'm replacing the whole file so I MUST include EditItemView.
 
 struct EditItemView: View {
     let item: ClipboardItem
@@ -438,8 +507,6 @@ struct EditItemView: View {
     }
 }
 
-
-
 struct AboutView: View {
     var onClose: () -> Void
     
@@ -455,7 +522,7 @@ struct AboutView: View {
                 Text("Mac Clipboard Manager")
                     .font(.title2)
                     .fontWeight(.bold)
-                Text("Version 2.0.0")
+                Text("Version 4.0.0")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -465,10 +532,10 @@ struct AboutView: View {
             
             VStack(spacing: 8) {
                 Text("Developed by")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                .font(.caption)
+                .foregroundColor(.secondary)
                 Text("Haji Salam")
-                    .font(.headline)
+                .font(.headline)
             }
             
             Text("© 2025 Haji Salam. All rights reserved.")

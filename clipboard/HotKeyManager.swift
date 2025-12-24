@@ -9,6 +9,7 @@ class HotKeyManager: ObservableObject {
     // Unique ID for our hotkey
     private let hotKeyID = EventHotKeyID(signature: 0x4D434244, id: 1) // 'MCBD', 1
     private var eventHandler: EventHandlerRef?
+    private var currentHotKeyRef: EventHotKeyRef?
     var onHotKeyTriggered: (() -> Void)?
     
     // Published for UI
@@ -39,6 +40,8 @@ class HotKeyManager: ObservableObject {
             return
         }
         
+        currentHotKeyRef = hotKeyRef
+        
         // Install Event Handler
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                       eventKind: UInt32(kEventHotKeyPressed))
@@ -58,14 +61,17 @@ class HotKeyManager: ObservableObject {
     }
     
     func unregister() {
+        // 1. Remove Event Handler
         if let handler = eventHandler {
             RemoveEventHandler(handler)
             eventHandler = nil
         }
-        // Also simpler: UnregisterEventHotKey(hotKeyRef) if we kept the ref,
-        // but removing the handler stops the app from reacting.
-        // Ideally we should UnregisterEventHotKey too but Carbon API is old and tricky.
-        // For this scope, removing handler is effective.
+        
+        // 2. Unregister HotKey Ref
+        if let ref = currentHotKeyRef {
+            UnregisterEventHotKey(ref)
+            currentHotKeyRef = nil
+        }
     }
     
     func updateHotkey(keyCode: Int, modifiers: Int) {

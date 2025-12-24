@@ -1,21 +1,33 @@
 import Cocoa
 import Combine
+import SwiftUI // For Image
+
+enum ClipboardItemType: String, Codable {
+    case text
+    case image
+}
 
 struct ClipboardItem: Identifiable, Hashable, Codable {
     let id: UUID
-    let content: String // For now, just text. Later: enum for Image/RTF
+    let content: String // Text content or Description for image
     let date: Date
     let appBundleID: String?
     var isPinned: Bool
-    var color: String? // Hex code or name (e.g. "red", "blue")
+    var color: String?
     
-    init(id: UUID = UUID(), content: String, appBundleID: String? = nil, date: Date = Date(), isPinned: Bool = false, color: String? = nil) {
+    // V4 New Types
+    var type: ClipboardItemType = .text // Default to text for migration
+    var imagePath: String? // Filename in AppSupport if type is .image
+    
+    init(id: UUID = UUID(), content: String, appBundleID: String? = nil, date: Date = Date(), isPinned: Bool = false, color: String? = nil, type: ClipboardItemType = .text, imagePath: String? = nil) {
         self.id = id
         self.content = content
         self.date = date
         self.appBundleID = appBundleID
         self.isPinned = isPinned
         self.color = color
+        self.type = type
+        self.imagePath = imagePath
     }
 }
 
@@ -26,22 +38,23 @@ class ClipboardMonitor: ObservableObject {
             saveHistory()
         }
     }
+    
+    // Auto-Delete Setting (days). 0 = Never
+    @AppStorage("autoDeleteInterval") private var autoDeleteInterval: Int = 0
+    
     private var lastChangeCount: Int = 0
     private var timer: Timer?
     private let pasteboard = NSPasteboard.general
     private let historyKey = "ClipboardHistory_v1"
     
-    // Ignored apps (e.g. keychain access, etc - can be populated later)
-    var ignoredApps: [String] = []
-
     init() {
-        // Load history first
         self.loadHistory()
-        
-        // Initial check to sync with current state without duplicating if needed
         lastChangeCount = pasteboard.changeCount
         
         startCloudSync()
+        
+        // Run Cleanup on launch
+        cleanupOldItems()
     }
     
     func startMonitoring() {
@@ -56,48 +69,140 @@ class ClipboardMonitor: ObservableObject {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
         
-        // Retrieve content
-        if let newString = pasteboard.string(forType: .string) {
-            // Deduplicate: Don't add if it's exactly the same as the last item
-            if let lastItem = history.first, lastItem.content == newString {
+        // 1. Check for Image
+        if let tiffData = pasteboard.data(forType: .tiff) ?? pasteboard.data(forType: .png) {
+            // It's an image
+            let filename = UUID().uuidString + ".png"
+            if saveImageToDisk(data: tiffData, filename: filename) {
+                let newItem = ClipboardItem(content: "Image", appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, type: .image, imagePath: filename)
+                 DispatchQueue.main.async {
+                    self.history.insert(newItem, at: 0)
+                    self.limitHistory()
+                }
                 return
             }
+        }
+        
+        // 2. Check for Text (Standard)
+        if let newString = pasteboard.string(forType: .string) {
+            if let lastItem = history.first, lastItem.content == newString { return }
             
-            let newItem = ClipboardItem(content: newString, appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+            let newItem = ClipboardItem(content: newString, appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, type: .text)
             
-            // UI updates must be on main thread
             DispatchQueue.main.async {
                 self.history.insert(newItem, at: 0)
-                // Limit history size
-                if self.history.count > 100 {
-                    self.history.removeLast()
-                }
+                self.limitHistory()
             }
         }
     }
     
+    private func limitHistory() {
+        if self.history.count > 100 {
+            // If we remove items, check for images to delete from disk
+            let removed = self.history.popLast()
+            if let removed = removed, removed.type == .image, let path = removed.imagePath {
+                deleteImageFromDisk(filename: path)
+            }
+        }
+    }
+    
+    // Auto-Delete Logic
+    func cleanupOldItems() {
+        guard autoDeleteInterval > 0 else { return }
+        
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -autoDeleteInterval, to: Date()) ?? Date()
+        
+        // Filter Items to keep
+        // Keep if (Pinned) OR (Date > Cutoff)
+        // Delete if (!Pinned) AND (Date < Cutoff)
+        
+        var toKeep: [ClipboardItem] = []
+        var toDelete: [ClipboardItem] = []
+        
+        for item in history {
+            if item.isPinned || item.date > cutoffDate {
+                toKeep.append(item)
+            } else {
+                toDelete.append(item)
+            }
+        }
+        
+        // Perform Deletion (mainly for images)
+        for item in toDelete {
+            if item.type == .image, let path = item.imagePath {
+                deleteImageFromDisk(filename: path)
+            }
+        }
+        
+        if history.count != toKeep.count {
+            print("Auto-Delete: Removed \(history.count - toKeep.count) items older than \(autoDeleteInterval) days.")
+            history = toKeep
+        }
+    }
+    
+    // MARK: - Disk I/O for Images
+    private func getDocumentsDirectory() -> URL {
+        let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        let dir = paths[0].appendingPathComponent("ClipboardManagerImages")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    private func saveImageToDisk(data: Data, filename: String) -> Bool {
+        let url = getDocumentsDirectory().appendingPathComponent(filename)
+        do {
+            // For now assuming PNG/TIFF data is writable directly. 
+            // Better to convert to PNG if it was TIFF, but simply writing bytes usually works for NSImage loading.
+            // Let's ensure it's PNG for consistency if possible, but raw write is faster.
+            try data.write(to: url)
+            return true
+        } catch {
+            print("Failed to save image: \(error)")
+            return false
+        }
+    }
+    
+    private func deleteImageFromDisk(filename: String) {
+        let url = getDocumentsDirectory().appendingPathComponent(filename)
+        try? FileManager.default.removeItem(at: url)
+    }
+    
+    func loadImage(filename: String) -> NSImage? {
+        let url = getDocumentsDirectory().appendingPathComponent(filename)
+        return NSImage(contentsOf: url)
+    }
+    
+    // MARK: - Standard Methods
     func copyToClipboard(item: ClipboardItem) {
         pasteboard.clearContents()
-        pasteboard.setString(item.content, forType: .string)
-        // Updating changeCount happens automatically, so our monitor will see it.
-        // We might want to ignore our own copy? For now let it be "top of stack".
+        
+        if item.type == .image, let filename = item.imagePath, let image = loadImage(filename: filename) {
+            pasteboard.writeObjects([image])
+        } else {
+            pasteboard.setString(item.content, forType: .string)
+        }
     }
     
     func clearHistory() {
+        // Delete all images
+        for item in history {
+            if item.type == .image, let p = item.imagePath {
+                deleteImageFromDisk(filename: p)
+            }
+        }
         history.removeAll()
     }
     
     func updateItem(id: UUID, newContent: String) {
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
-        
-        // We modify the existing item (struct) copy
         var item = history[index]
-        // Create new item with updated content, but keep old metadata if relevant? 
-        // Actually, if we edit text, we might want to update date. But for pin/color we want methods.
-        // Let's just create a new one with updated content.
-        let newItem = ClipboardItem(id: item.id, content: newContent, appBundleID: item.appBundleID, date: Date(), isPinned: item.isPinned, color: item.color)
-        
-        history[index] = newItem
+        // If editing an image, converting to text?
+        // For V4, assuming we only edit text items. 
+        // If it was image, prevent edit or convert? Let's assume Text edit only.
+        if item.type == .text {
+            let newItem = ClipboardItem(id: item.id, content: newContent, appBundleID: item.appBundleID, date: Date(), isPinned: item.isPinned, color: item.color, type: .text)
+            history[index] = newItem
+        }
     }
     
     func togglePin(id: UUID) {
@@ -105,8 +210,6 @@ class ClipboardMonitor: ObservableObject {
         var item = history[index]
         item.isPinned.toggle()
         history[index] = item
-        // Move to top/sort happens in View or we can sort here? 
-        // Standard practice: "Pinning" usually just flags it. View handles display order.
     }
     
     func setColor(id: UUID, color: String?) {
@@ -118,6 +221,10 @@ class ClipboardMonitor: ObservableObject {
     
     func deleteItem(id: UUID) {
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        let item = history[index]
+        if item.type == .image, let path = item.imagePath {
+            deleteImageFromDisk(filename: path)
+        }
         history.remove(at: index)
     }
     
@@ -125,54 +232,35 @@ class ClipboardMonitor: ObservableObject {
     func startCloudSync() {
         NSUbiquitousKeyValueStore.default.synchronize()
         NotificationCenter.default.addObserver(self, selector: #selector(cloudDataChanged(_:)), name: NSUbiquitousKeyValueStore.didChangeExternallyNotification, object: NSUbiquitousKeyValueStore.default)
-        // Initial load check
         loadFromCloud()
     }
     
     @objc func cloudDataChanged(_ notification: Notification) {
-        Task { @MainActor in
-            self.loadFromCloud()
-        }
+        Task { @MainActor in self.loadFromCloud() }
     }
     
-    // Simple Sync Policy: Pinned items UUIDs + simplified metadata
-    // For now, we only sync which IDs are pinned, or if we want to sync the content of pinned items?
-    // Let's assume we sync the Content of items that are pinned.
-    // NOTE: This basic implementation only syncs a small array of pinned items. Large clips might fail KV limits (1MB total).
-    
     private func saveToCloud() {
-        // Find pinned items
         let pinned = history.filter { $0.isPinned }
-        do {
-            let data = try JSONEncoder().encode(pinned)
+        do { // Only sync text items to avoid large blobs
+            let safePinned = pinned.filter { $0.type == .text } 
+            let data = try JSONEncoder().encode(safePinned)
             NSUbiquitousKeyValueStore.default.set(data, forKey: "pinned_items")
             NSUbiquitousKeyValueStore.default.synchronize()
-        } catch {
-            print("Cloud Save Error: \(error)")
-        }
+        } catch { print("Cloud Save Error: \(error)") }
     }
     
     private func loadFromCloud() {
         guard let data = NSUbiquitousKeyValueStore.default.data(forKey: "pinned_items") else { return }
         do {
             let cloudPinned = try JSONDecoder().decode([ClipboardItem].self, from: data)
-            // Merge strategy: Add any cloud pinned items that we don't have locally.
-            // If we have them, ensure they are pinned.
-            
             for cloudItem in cloudPinned {
                 if let index = history.firstIndex(where: { $0.id == cloudItem.id }) {
-                    // Update local to match cloud status (pinned)
-                    if !history[index].isPinned {
-                        history[index].isPinned = true
-                    }
+                    if !history[index].isPinned { history[index].isPinned = true }
                 } else {
-                    // Item doesn't exist locally, insert it at top
                     history.insert(cloudItem, at: 0)
                 }
             }
-        } catch {
-            print("Cloud Load Error: \(error)")
-        }
+        } catch { print("Cloud Load Error: \(error)") }
     }
     
     // MARK: - Persistence
@@ -180,13 +268,8 @@ class ClipboardMonitor: ObservableObject {
         do {
             let encoded = try JSONEncoder().encode(history)
             UserDefaults.standard.set(encoded, forKey: historyKey)
-            
-            // Trigger cloud save if pinned items changed?
-            // Simple optimization: call saveToCloud every time for now (debouncing better in prod)
             saveToCloud()
-        } catch {
-            print("Failed to save history: \(error)")
-        }
+        } catch { print("Failed to save history: \(error)") }
     }
     
     private func loadHistory() {
@@ -194,8 +277,6 @@ class ClipboardMonitor: ObservableObject {
         do {
             let decoded = try JSONDecoder().decode([ClipboardItem].self, from: data)
             self.history = decoded
-        } catch {
-            print("Failed to load history: \(error)")
-        }
+        } catch { print("Failed to load history: \(error)") }
     }
 }
