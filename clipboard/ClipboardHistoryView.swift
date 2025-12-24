@@ -321,9 +321,10 @@ struct ClipboardItemRow: View {
                     }
                 } else {
                     // Text Content
-                    Text(item.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                    // Use LocalizedStringKey to trigger Markdown rendering
+                    Text(LocalizedStringKey(item.content.trimmingCharacters(in: .whitespacesAndNewlines)))
                         .font(.system(size: 13))
-                        .lineLimit(item.isPinned ? 4 : 2) // Expand pinned slightly
+                        .lineLimit(item.isPinned ? 4 : 2)
                         .foregroundColor(.primary)
                 }
                 
@@ -336,6 +337,14 @@ struct ClipboardItemRow: View {
                     
                     Text(item.date, style: .time)
                         .font(.system(size: 10))
+                        
+                    // Rich Text Indicator
+                    if item.rtfPath != nil || item.htmlPath != nil {
+                        Image(systemName: "doc.richtext")
+                            .font(.system(size: 10))
+                            .foregroundColor(.accentColor)
+                            .help("Contains Rich Text")
+                    }
                 }
                 .foregroundColor(.secondary.opacity(0.7))
             }
@@ -404,7 +413,49 @@ struct ClipboardItemRow: View {
                 Button("Edit") { onEdit() }
             }
             Button("Delete") { onDelete() }
+            
             Divider()
+            
+            // Quick Actions
+            if item.type == .text {
+                Menu("Quick Actions") {
+                    Button("Copy as Plain Text") {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(item.content, forType: .string)
+                        NSSound(named: "Pop")?.play()
+                    }
+                    
+                    if item.content.contains("http://") || item.content.contains("https://") {
+                        Button("Open URL") {
+                            if let url = extractFirstURL(from: item.content) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    Menu("Transform") {
+                        Button("UPPERCASE") {
+                            monitor.updateItem(id: item.id, newContent: item.content.uppercased())
+                        }
+                        Button("lowercase") {
+                            monitor.updateItem(id: item.id, newContent: item.content.lowercased())
+                        }
+                        Button("Title Case") {
+                            monitor.updateItem(id: item.id, newContent: item.content.capitalized)
+                        }
+                        Button("Remove Line Breaks") {
+                            let cleaned = item.content.replacingOccurrences(of: "\n", with: " ")
+                            monitor.updateItem(id: item.id, newContent: cleaned)
+                        }
+                    }
+                }
+            }
+            
+            Divider()
+            
             Text("Color Tag")
             Button("None") { onColor(nil) }
             Button("Red") { onColor("red") }
@@ -614,4 +665,15 @@ struct VisualEffectBlur: NSViewRepresentable {
 
 extension Color {
     static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
+}
+
+// MARK: - Helper Functions
+func extractFirstURL(from text: String) -> URL? {
+    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    let matches = detector?.matches(in: text, range: NSRange(text.startIndex..., in: text))
+    if let match = matches?.first, let range = Range(match.range, in: text) {
+        let urlString = String(text[range])
+        return URL(string: urlString)
+    }
+    return nil
 }

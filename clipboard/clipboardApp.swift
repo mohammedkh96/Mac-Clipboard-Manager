@@ -162,6 +162,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 struct SettingsView: View {
     @AppStorage("appTheme") private var appTheme: String = "system"
     @AppStorage("autoDeleteInterval") private var autoDeleteInterval: Int = 0
+    @AppStorage("historyLimit") private var historyLimit: Int = 100
+    @AppStorage("soundEffectsEnabled") private var soundEffectsEnabled: Bool = true
+    @AppStorage("showCountInMenuBar") private var showCountInMenuBar: Bool = false
     @ObservedObject var hotKeyManager = HotKeyManager.shared
     
     @State private var isRecording = false
@@ -177,7 +180,6 @@ struct SettingsView: View {
                         Text("Dark").tag("dark")
                     }
                     .pickerStyle(SegmentedPickerStyle())
-                    .padding(.vertical, 8)
                     .padding(.vertical, 8)
                 }
                 
@@ -203,6 +205,27 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+                
+                Section(header: Text("Behavior")) {
+                    Toggle("Sound Effects", isOn: $soundEffectsEnabled)
+                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                    
+                    Toggle("Show Item Count in Menu Bar", isOn: $showCountInMenuBar)
+                        .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                    
+                    Picker("History Limit:", selection: $historyLimit) {
+                        Text("50 items").tag(50)
+                        Text("100 items").tag(100)
+                        Text("200 items").tag(200)
+                        Text("500 items").tag(500)
+                        Text("Unlimited").tag(0)
+                    }
+                    .padding(.vertical, 4)
+                    
+                    Text("Maximum number of items to keep in history. Set to Unlimited for no limit.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 
                 Section(header: Text("Storage Management")) {

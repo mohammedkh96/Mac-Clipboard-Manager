@@ -19,7 +19,11 @@ struct ClipboardItem: Identifiable, Hashable, Codable {
     var type: ClipboardItemType = .text // Default to text for migration
     var imagePath: String? // Filename in AppSupport if type is .image
     
-    init(id: UUID = UUID(), content: String, appBundleID: String? = nil, date: Date = Date(), isPinned: Bool = false, color: String? = nil, type: ClipboardItemType = .text, imagePath: String? = nil) {
+    // V6 Rich Text
+    var rtfPath: String?
+    var htmlPath: String?
+    
+    init(id: UUID = UUID(), content: String, appBundleID: String? = nil, date: Date = Date(), isPinned: Bool = false, color: String? = nil, type: ClipboardItemType = .text, imagePath: String? = nil, rtfPath: String? = nil, htmlPath: String? = nil) {
         self.id = id
         self.content = content
         self.date = date
@@ -28,6 +32,8 @@ struct ClipboardItem: Identifiable, Hashable, Codable {
         self.color = color
         self.type = type
         self.imagePath = imagePath
+        self.rtfPath = rtfPath
+        self.htmlPath = htmlPath
     }
 }
 
@@ -69,11 +75,13 @@ class ClipboardMonitor: ObservableObject {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
         
-        // 1. Check for Image
+        // 1. Check for Image FIRST (Priority)
+        // Many apps that copy images also put text metadata on pasteboard (file paths, descriptions)
+        // So we must check for image data first to avoid treating it as text
         if let tiffData = pasteboard.data(forType: .tiff) ?? pasteboard.data(forType: .png) {
-            // It's an image
+            print("Found Image Data")
             let filename = UUID().uuidString + ".png"
-            if saveImageToDisk(data: tiffData, filename: filename) {
+            if saveDataToDisk(data: tiffData, filename: filename) {
                 let newItem = ClipboardItem(content: "Image", appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, type: .image, imagePath: filename)
                  DispatchQueue.main.async {
                     self.history.insert(newItem, at: 0)
@@ -83,16 +91,47 @@ class ClipboardMonitor: ObservableObject {
             }
         }
         
-        // 2. Check for Text (Standard)
+        // 2. Check for Text with Rich Text augmentation
         if let newString = pasteboard.string(forType: .string) {
+            // Check for duplicates
             if let lastItem = history.first, lastItem.content == newString { return }
             
-            let newItem = ClipboardItem(content: newString, appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, type: .text)
+            print("Found Text: \(newString.prefix(20))...")
+            
+            var rtfPath: String? = nil
+            var htmlPath: String? = nil
+            
+            // Check for RTF
+            if let rtfData = pasteboard.data(forType: .rtf) {
+                print("Found RTF Data")
+                let filename = UUID().uuidString + ".rtf"
+                if saveDataToDisk(data: rtfData, filename: filename) {
+                    rtfPath = filename
+                }
+            }
+            
+            // Check for HTML
+            if let htmlData = pasteboard.data(forType: .html) {
+                print("Found HTML Data")
+                let filename = UUID().uuidString + ".html"
+                if saveDataToDisk(data: htmlData, filename: filename) {
+                    htmlPath = filename
+                }
+            }
+            
+            let newItem = ClipboardItem(
+                content: newString,
+                appBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                type: .text,
+                rtfPath: rtfPath,
+                htmlPath: htmlPath
+            )
             
             DispatchQueue.main.async {
                 self.history.insert(newItem, at: 0)
                 self.limitHistory()
             }
+            return
         }
     }
     
@@ -100,9 +139,7 @@ class ClipboardMonitor: ObservableObject {
         if self.history.count > 100 {
             // If we remove items, check for images to delete from disk
             let removed = self.history.popLast()
-            if let removed = removed, removed.type == .image, let path = removed.imagePath {
-                deleteImageFromDisk(filename: path)
-            }
+            cleanupFiles(for: removed)
         }
     }
     
@@ -129,9 +166,7 @@ class ClipboardMonitor: ObservableObject {
         
         // Perform Deletion (mainly for images)
         for item in toDelete {
-            if item.type == .image, let path = item.imagePath {
-                deleteImageFromDisk(filename: path)
-            }
+            cleanupFiles(for: item)
         }
         
         if history.count != toKeep.count {
@@ -140,36 +175,46 @@ class ClipboardMonitor: ObservableObject {
         }
     }
     
-    // MARK: - Disk I/O for Images
+    private func cleanupFiles(for item: ClipboardItem?) {
+        guard let item = item else { return }
+        if let path = item.imagePath { deleteFileFromDisk(filename: path) }
+        if let path = item.rtfPath { deleteFileFromDisk(filename: path) }
+        if let path = item.htmlPath { deleteFileFromDisk(filename: path) }
+    }
+    
+    // MARK: - Disk I/O
     private func getDocumentsDirectory() -> URL {
         let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        let dir = paths[0].appendingPathComponent("ClipboardManagerImages")
+        let dir = paths[0].appendingPathComponent("ClipboardManagerData") // Renamed directory for generic usage
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
     
-    private func saveImageToDisk(data: Data, filename: String) -> Bool {
+    private func saveDataToDisk(data: Data, filename: String) -> Bool {
         let url = getDocumentsDirectory().appendingPathComponent(filename)
         do {
-            // For now assuming PNG/TIFF data is writable directly. 
-            // Better to convert to PNG if it was TIFF, but simply writing bytes usually works for NSImage loading.
-            // Let's ensure it's PNG for consistency if possible, but raw write is faster.
             try data.write(to: url)
             return true
         } catch {
-            print("Failed to save image: \(error)")
+            print("Failed to save data: \(error)")
             return false
         }
     }
     
-    private func deleteImageFromDisk(filename: String) {
+    private func deleteFileFromDisk(filename: String) {
         let url = getDocumentsDirectory().appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: url)
     }
     
-    func loadImage(filename: String) -> NSImage? {
+    func loadData(filename: String) -> Data? {
         let url = getDocumentsDirectory().appendingPathComponent(filename)
-        return NSImage(contentsOf: url)
+        return try? Data(contentsOf: url)
+    }
+    
+    func loadImage(filename: String) -> NSImage? {
+        // Kept for convenience
+        guard let data = loadData(filename: filename) else { return nil }
+        return NSImage(data: data)
     }
     
     // MARK: - Standard Methods
@@ -179,6 +224,16 @@ class ClipboardMonitor: ObservableObject {
         if item.type == .image, let filename = item.imagePath, let image = loadImage(filename: filename) {
             pasteboard.writeObjects([image])
         } else {
+            // prioritize RTF
+            if let rtfPath = item.rtfPath, let rtfData = loadData(filename: rtfPath) {
+                pasteboard.setData(rtfData, forType: .rtf)
+            }
+            // fallback/concurrent HTML
+            if let htmlPath = item.htmlPath, let htmlData = loadData(filename: htmlPath) {
+                pasteboard.setData(htmlData, forType: .html)
+            }
+            
+            // Always set string as fallback
             pasteboard.setString(item.content, forType: .string)
         }
     }
@@ -186,9 +241,7 @@ class ClipboardMonitor: ObservableObject {
     func clearHistory() {
         // Delete all images
         for item in history {
-            if item.type == .image, let p = item.imagePath {
-                deleteImageFromDisk(filename: p)
-            }
+            cleanupFiles(for: item)
         }
         history.removeAll()
     }
@@ -200,6 +253,10 @@ class ClipboardMonitor: ObservableObject {
         // For V4, assuming we only edit text items. 
         // If it was image, prevent edit or convert? Let's assume Text edit only.
         if item.type == .text {
+            // Note: If we edit the text content of a Rich Text item, we generally LOSE the rich text formatting
+            // because the edited plain text no longer matches the stored RTF.
+            // So we should verify if the user intended to strip formatting.
+            // For now, we will create a NEW item with just the updated text, stripping legacy RTF paths to avoid out-of-sync data.
             let newItem = ClipboardItem(id: item.id, content: newContent, appBundleID: item.appBundleID, date: Date(), isPinned: item.isPinned, color: item.color, type: .text)
             history[index] = newItem
         }
@@ -222,9 +279,7 @@ class ClipboardMonitor: ObservableObject {
     func deleteItem(id: UUID) {
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
         let item = history[index]
-        if item.type == .image, let path = item.imagePath {
-            deleteImageFromDisk(filename: path)
-        }
+        cleanupFiles(for: item)
         history.remove(at: index)
     }
     
