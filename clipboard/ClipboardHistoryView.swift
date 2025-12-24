@@ -5,6 +5,9 @@ struct ClipboardHistoryView: View {
     @ObservedObject var monitor: ClipboardMonitor
     var onPaste: (ClipboardItem) -> Void
     var onClose: () -> Void
+    var onSettings: () -> Void
+    
+    @AppStorage("appTheme") private var appTheme: String = "system"
     
     @State private var searchText = ""
     @State private var hoveredItemId: UUID?
@@ -36,7 +39,7 @@ struct ClipboardHistoryView: View {
             // Main View
             VStack(spacing: 0) {
                 // Header
-                HeaderView(monitor: monitor, onClose: onClose, onAbout: { showAboutSheet = true }, searchText: $searchText)
+                HeaderView(monitor: monitor, onClose: onClose, onAbout: { showAboutSheet = true }, onSettings: onSettings, searchText: $searchText)
                 
                 Divider()
                     .overlay(Color(nsColor: .separatorColor))
@@ -51,10 +54,16 @@ struct ClipboardHistoryView: View {
                                         editingItem = item
                                     }, onPin: {
                                         withAnimation { monitor.togglePin(id: item.id) }
+                                    }, onDelete: {
+                                        NSSound(named: "Trash")?.play()
+                                        withAnimation { monitor.deleteItem(id: item.id) }
                                     }, onColor: { color in
                                         withAnimation { monitor.setColor(id: item.id, color: color) }
                                     })
-                                    .onTapGesture { onPaste(item) }
+                                    .onTapGesture {
+                                        NSSound(named: "Pop")?.play()
+                                        onPaste(item)
+                                    }
                                     .onHover { hoveredItemId = $0 ? item.id : nil }
                                 }
                             }
@@ -67,10 +76,16 @@ struct ClipboardHistoryView: View {
                                         editingItem = item
                                     }, onPin: {
                                         withAnimation { monitor.togglePin(id: item.id) }
+                                    }, onDelete: {
+                                        NSSound(named: "Trash")?.play()
+                                        withAnimation { monitor.deleteItem(id: item.id) }
                                     }, onColor: { color in
                                         withAnimation { monitor.setColor(id: item.id, color: color) }
                                     })
-                                    .onTapGesture { onPaste(item) }
+                                    .onTapGesture {
+                                        NSSound(named: "Pop")?.play()
+                                        onPaste(item)
+                                    }
                                     .onHover { hoveredItemId = $0 ? item.id : nil }
                                 }
                             }
@@ -106,6 +121,7 @@ struct ClipboardHistoryView: View {
         }
         .background(VisualEffectBlur(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
         .frame(width: 380, height: 600)
+        .preferredColorScheme(appTheme == "light" ? .light : (appTheme == "dark" ? .dark : nil))
     }
 }
 
@@ -115,6 +131,7 @@ struct HeaderView: View {
     @ObservedObject var monitor: ClipboardMonitor
     var onClose: () -> Void
     var onAbout: () -> Void
+    var onSettings: () -> Void
     @Binding var searchText: String
     
     var body: some View {
@@ -127,6 +144,14 @@ struct HeaderView: View {
                 }
                 .buttonStyle(.plain)
                 .help("About")
+                
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
                 
                 Text("Clipboard")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -200,6 +225,7 @@ struct ClipboardItemRow: View {
     let isHovered: Bool
     var onEdit: () -> Void
     var onPin: () -> Void
+    var onDelete: () -> Void
     var onColor: (String?) -> Void
     
     // Helpers for coloring
@@ -271,6 +297,18 @@ struct ClipboardItemRow: View {
                                 .background(Circle().fill(Color(nsColor: .controlBackgroundColor).opacity(0.5)))
                         }
                         .buttonStyle(.plain)
+                        .help("Edit")
+                        
+                        // Delete Button (New)
+                        Button(action: onDelete) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12))
+                                .foregroundColor(.red.opacity(0.8))
+                                .padding(4)
+                                .background(Circle().fill(Color(nsColor: .controlBackgroundColor).opacity(0.5)))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Delete")
                     }
                 }
                 .padding(.trailing, 8)
@@ -280,10 +318,14 @@ struct ClipboardItemRow: View {
             RoundedRectangle(cornerRadius: 0)
                 .fill(isHovered ? Color.accentColor.opacity(0.1) : Color.clear)
         )
+        .onDrag {
+            return NSItemProvider(object: item.content as NSString)
+        }
         // Context Menu for extra actions
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin") { onPin() }
             Button("Edit") { onEdit() }
+            Button("Delete") { onDelete() }
             Divider()
             Text("Color Tag")
             Button("None") { onColor(nil) }

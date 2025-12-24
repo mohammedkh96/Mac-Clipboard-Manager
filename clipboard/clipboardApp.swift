@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Carbon
 
 @main
 struct clipboardApp: App {
@@ -19,7 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var historyView: ClipboardHistoryView?
     var popover: NSPopover!
     var statusBarItem: NSStatusItem!
-    var hotKeyManager = HotKeyManager()
+    var hotKeyManager = HotKeyManager.shared
+    
+    var settingsWindow: NSWindow?
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // Handle Dock Icon Click
@@ -52,6 +55,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let swiftUIView = ClipboardHistoryView(monitor: monitor, onPaste: { [weak self] item in
             self?.pasteItem(item)
         }, onClose: { [weak self] in
+            self?.closePopover(nil)
+        }, onSettings: { [weak self] in
+            self?.openSettings()
             self?.closePopover(nil)
         })
         
@@ -130,5 +136,141 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         vDown?.post(tap: .cghidEventTap)
         vUp?.post(tap: .cghidEventTap)
         cmdUp?.post(tap: .cghidEventTap)
+    }
+    
+    func openSettings() {
+        if settingsWindow == nil {
+            let settingsView = SettingsView()
+            let hostingController = NSHostingController(rootView: settingsView)
+            
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Settings"
+            window.setContentSize(NSSize(width: 400, height: 250))
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.center()
+            window.isReleasedWhenClosed = false
+            
+            settingsWindow = window
+        }
+        
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage("appTheme") private var appTheme: String = "system"
+    @ObservedObject var hotKeyManager = HotKeyManager.shared
+    
+    @State private var isRecording = false
+    
+    var body: some View {
+        TabView {
+            // General / Appearance Tab
+            Form {
+                Section(header: Text("Appearance")) {
+                    Picker("Theme", selection: $appTheme) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.vertical, 8)
+                }
+                
+                Section(header: Text("Keyboard Shortcut")) {
+                    HStack {
+                        Text("Toggle Clipboard:")
+                        Spacer()
+                        Button(action: {
+                            isRecording = true
+                        }) {
+                            Text(isRecording ? "Press Keys..." : hotKeyManager.currentKeyString)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(6)
+                                .background(isRecording ? Color.accentColor : Color.gray.opacity(0.2))
+                                .foregroundColor(isRecording ? .white : .primary)
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .background(KeyRecorder(isRecording: $isRecording, manager: hotKeyManager))
+                    }
+                    .padding(.vertical, 8)
+                    
+                    Text("Click to record a new shortcut.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .tabItem {
+                Label("General", systemImage: "gear")
+            }
+            
+            // About Tab
+            VStack(spacing: 20) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 80, height: 80)
+                
+                Text("Mac Clipboard Manager")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text("Version 3.0.0")
+                    .foregroundColor(.secondary)
+                
+                Text("Designed & Developed by\nHaji Salam")
+                    .multilineTextAlignment(.center)
+                    .font(.caption)
+                    .padding()
+            }
+            .padding()
+            .tabItem {
+                Label("About", systemImage: "info.circle")
+            }
+        }
+        .frame(width: 400, height: 250)
+    }
+}
+
+struct KeyRecorder: NSViewRepresentable {
+    @Binding var isRecording: Bool
+    var manager: HotKeyManager
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = KeyCaptureView()
+        view.onKeyPress = { code, mods in
+            if isRecording {
+                let carbonMods = convertModifiers(mods)
+                manager.updateHotkey(keyCode: parseInt(code), modifiers: carbonMods)
+                isRecording = false
+            }
+        }
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {}
+    
+    private func parseInt(_ code: UInt16) -> Int {
+        return Int(code)
+    }
+    
+    private func convertModifiers(_ flags: NSEvent.ModifierFlags) -> Int {
+        var mods = 0
+        if flags.contains(.command) { mods |= cmdKey }
+        if flags.contains(.shift) { mods |= shiftKey }
+        if flags.contains(.option) { mods |= optionKey }
+        if flags.contains(.control) { mods |= controlKey }
+        return mods
+    }
+}
+
+class KeyCaptureView: NSView {
+    var onKeyPress: ((UInt16, NSEvent.ModifierFlags) -> Void)?
+    
+    override var acceptsFirstResponder: Bool { true }
+    
+    override func keyDown(with event: NSEvent) {
+        onKeyPress?(event.keyCode, event.modifierFlags)
     }
 }

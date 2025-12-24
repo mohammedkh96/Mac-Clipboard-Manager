@@ -116,6 +116,11 @@ class ClipboardMonitor: ObservableObject {
         history[index] = item
     }
     
+    func deleteItem(id: UUID) {
+        guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        history.remove(at: index)
+    }
+    
     // MARK: - Cloud Sync
     func startCloudSync() {
         NSUbiquitousKeyValueStore.default.synchronize()
