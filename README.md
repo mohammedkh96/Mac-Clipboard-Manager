@@ -2,7 +2,6 @@
 
 <div align="center">
 
-![App Icon](clipboard/Assets.xcassets/AppIcon.appiconset/icon_256x256.png)
 
 **Advanced clipboard manager for macOS with Rich Text, Images, and Power User Features**
 
