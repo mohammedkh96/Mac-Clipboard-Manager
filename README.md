@@ -59,7 +59,7 @@ Comprehensive settings with:
 ## 🚀 Installation
 
 ### Download
-1. Download the latest release from [Releases](https://github.com/YOUR_USERNAME/mac-clipboard-manager/releases)
+1. Download the latest release from [Releases](https://github.com/mohammedkh96/Mac-Clipboard-Manager/releases)
 2. Open the DMG file
 3. Drag **Mac Clipboard Manager** to Applications
 4. Launch the app
